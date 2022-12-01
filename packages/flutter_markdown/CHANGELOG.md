@@ -1,3 +1,7 @@
+## 0.7.0
+
+* Support `SelectionArea` when selectable is `true`.
+
 ## 0.6.13
 
 * Support changes in the latest `package:markdown`.
