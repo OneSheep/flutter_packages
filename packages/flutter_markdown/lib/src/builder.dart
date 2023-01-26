@@ -705,7 +705,7 @@ class MarkdownBuilder implements md.NodeVisitor {
     for (final Widget child in children) {
       if (mergedTexts.isNotEmpty &&
           _isTwoTextWidgetsSimilar(child, mergedTexts.last)) {
-        var previous = mergedTexts.removeLast();
+        Widget previous = mergedTexts.removeLast();
         TextSpan previousTextSpan;
         if (previous is Text) {
           previousTextSpan = previous.textSpan as TextSpan;
@@ -873,8 +873,8 @@ class MarkdownBuilder implements md.NodeVisitor {
         key: k,
       );
     } else {
-      return RichText(
-        text: text!,
+      return Text.rich(
+        text!,
         textScaleFactor: styleSheet.textScaleFactor!,
         textAlign: textAlign ?? TextAlign.start,
         key: k,
