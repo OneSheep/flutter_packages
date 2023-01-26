@@ -1,7 +1,6 @@
 ## 0.6.14
 
-* Fixes Text overflowing for different style texts package:markdown`.
-
+* Fixes combination of inline styles causing unwanted line breaks.
 
 ## 0.6.13
 

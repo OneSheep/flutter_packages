@@ -686,7 +686,8 @@ class MarkdownBuilder implements md.NodeVisitor {
     }
   }
 
-  bool isTwoTextWidgetsSimilar(Widget current, Widget previous) {
+  /// Check if two widgets are either [Text] or [RichText]
+  bool _isTwoTextWidgetsSimilar(Widget current, Widget previous) {
     if ((current is Text || current is RichText) &&
         (previous is Text || previous is RichText)) {
       return true;
@@ -703,7 +704,7 @@ class MarkdownBuilder implements md.NodeVisitor {
     final List<Widget> mergedTexts = <Widget>[];
     for (final Widget child in children) {
       if (mergedTexts.isNotEmpty &&
-          isTwoTextWidgetsSimilar(child, mergedTexts.last)) {
+          _isTwoTextWidgetsSimilar(child, mergedTexts.last)) {
         var previous = mergedTexts.removeLast();
         TextSpan previousTextSpan;
         if (previous is Text) {
