@@ -33,6 +33,7 @@ void defineTests() {
         final Iterable<Widget> widgets = tester.allWidgets;
         expectTextStrings(widgets, <String>['H₂O']);
       },
+      tags: 'subscript',
     );
 
     testWidgets(
@@ -51,9 +52,9 @@ void defineTests() {
           ),
         );
 
-        final RichText textWidget = tester.widget(find.byType(RichText));
+        final Text textWidget = tester.widget(find.byType(Text));
         final TextSpan span =
-            (textWidget.text as TextSpan).children![1] as TextSpan;
+            (textWidget.textSpan as TextSpan).children![1] as TextSpan;
 
         expect(span.children, null);
         expect(span.recognizer.runtimeType, equals(TapGestureRecognizer));
@@ -76,9 +77,9 @@ void defineTests() {
           ),
         );
 
-        final RichText textWidget = tester.widget(find.byType(RichText));
+        final Text textWidget = tester.widget(find.byType(Text));
         final TextSpan span =
-            (textWidget.text as TextSpan).children![0] as TextSpan;
+            (textWidget.textSpan as TextSpan).children![0] as TextSpan;
         final WidgetSpan widgetSpan = span.children![0] as WidgetSpan;
         expect(widgetSpan.child, isInstanceOf<Container>());
       },
@@ -101,8 +102,8 @@ void defineTests() {
         ),
       );
 
-      final RichText textWidget = tester.widget(find.byType(RichText));
-      final TextSpan textSpan = textWidget.text as TextSpan;
+      final Text textWidget = tester.widget(find.byType(Text));
+      final TextSpan textSpan = textWidget.textSpan as TextSpan;
       final TextSpan start = textSpan.children![0] as TextSpan;
       expect(start.text, 'this test replaces a string with a ');
       final TextSpan end = textSpan.children![1] as TextSpan;

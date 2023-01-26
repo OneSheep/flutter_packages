@@ -686,6 +686,16 @@ class MarkdownBuilder implements md.NodeVisitor {
     }
   }
 
+  /// Check if two widgets are either [Text] or [RichText]
+  bool _isTwoTextWidgetsSimilar(Widget current, Widget previous) {
+    if ((current is Text || current is RichText) &&
+        (previous is Text || previous is RichText)) {
+      return true;
+    }
+
+    return false;
+  }
+
   /// Merges adjacent [TextSpan] children
   List<Widget> _mergeInlineChildren(
     List<Widget> children,
@@ -694,10 +704,22 @@ class MarkdownBuilder implements md.NodeVisitor {
     final List<Widget> mergedTexts = <Widget>[];
     for (final Widget child in children) {
       if (mergedTexts.isNotEmpty &&
-          mergedTexts.last is RichText &&
-          child is RichText) {
-        final RichText previous = mergedTexts.removeLast() as RichText;
-        final TextSpan previousTextSpan = previous.text as TextSpan;
+          _isTwoTextWidgetsSimilar(child, mergedTexts.last)) {
+        var previous = mergedTexts.removeLast();
+        TextSpan previousTextSpan;
+        if (previous is Text) {
+          previousTextSpan = previous.textSpan as TextSpan;
+        } else {
+          previousTextSpan = (previous as RichText).text as TextSpan;
+        }
+
+        TextSpan childTextSpan;
+        if (child is Text) {
+          childTextSpan = child.textSpan as TextSpan;
+        } else {
+          childTextSpan = (child as RichText).text as TextSpan;
+        }
+
         final List<TextSpan> children = previousTextSpan.children != null
             ? previousTextSpan.children!
                 .map((InlineSpan span) => span is! TextSpan
@@ -705,7 +727,7 @@ class MarkdownBuilder implements md.NodeVisitor {
                     : span)
                 .toList()
             : <TextSpan>[previousTextSpan];
-        children.add(child.text as TextSpan);
+        children.add(childTextSpan);
         final TextSpan? mergedSpan = _mergeSimilarTextSpans(children);
         mergedTexts.add(_buildRichText(
           mergedSpan,

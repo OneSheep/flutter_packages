@@ -1,3 +1,7 @@
+## 0.6.14
+
+* Fixes combination of inline styles causing unwanted line breaks.
+
 ## 0.6.13
 
 * Support changes in the latest `package:markdown`.
