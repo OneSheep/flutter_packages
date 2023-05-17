@@ -28,6 +28,7 @@ class App extends StatelessWidget {
 
 @TypedGoRoute<HomeRoute>(
   path: '/',
+  name: 'Home',
   routes: <TypedGoRoute<GoRouteData>>[
     TypedGoRoute<FamilyRoute>(path: 'family/:familyId')
   ],
@@ -36,7 +37,7 @@ class HomeRoute extends GoRouteData {
   const HomeRoute();
 
   @override
-  Widget build(BuildContext context) => const HomeScreen();
+  Widget build(BuildContext context, GoRouterState state) => const HomeScreen();
 }
 
 class FamilyRoute extends GoRouteData {
@@ -45,7 +46,7 @@ class FamilyRoute extends GoRouteData {
   final String familyId;
 
   @override
-  Widget build(BuildContext context) =>
+  Widget build(BuildContext context, GoRouterState state) =>
       FamilyScreen(family: familyById(familyId));
 }
 

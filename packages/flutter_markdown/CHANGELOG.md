@@ -1,6 +1,21 @@
+## NEXT
+
+* Updates minimum Flutter version to 3.3.
+* Aligns Dart and Flutter SDK constraints.
+* Replace `describeEnum` with the `name` getter.
+
 ## 0.6.14
 
 * Fixes combination of inline styles causing unwanted line breaks.
+
+## 0.6.14
+
+* Require `markdown: ^7.0.0`
+
+## 0.6.13+1
+
+* Adjusts code to account for nullability change in Flutter SDK.
+* Updates the example to specify the import for `DropdownMenu`.
 
 ## 0.6.13
 
