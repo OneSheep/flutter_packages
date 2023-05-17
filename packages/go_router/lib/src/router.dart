@@ -8,6 +8,7 @@ import 'configuration.dart';
 import 'delegate.dart';
 import 'information_provider.dart';
 import 'logging.dart';
+import 'match.dart';
 import 'matching.dart';
 import 'misc/inherited_router.dart';
 import 'parser.dart';
@@ -30,7 +31,7 @@ import 'typedefs.dart';
 /// changes.
 ///
 /// See also:
-/// * [Configuration](https://pub.dev/documentation/go_router/topics/Configuration-topic.html)
+/// * [Configuration](https://pub.dev/documentation/go_router/latest/topics/Configuration-topic.html)
 /// * [GoRoute], which provides APIs to define the routing table.
 /// * [examples](https://github.com/flutter/packages/tree/main/packages/go_router/example),
 ///    which contains examples for different routing scenarios.
@@ -59,11 +60,16 @@ class GoRouter extends ChangeNotifier implements RouterConfig<RouteMatchList> {
     int redirectLimit = 5,
     bool routerNeglect = false,
     String? initialLocation,
+    Object? initialExtra,
     List<NavigatorObserver>? observers,
     bool debugLogDiagnostics = false,
     GlobalKey<NavigatorState>? navigatorKey,
     String? restorationScopeId,
-  }) : backButtonDispatcher = RootBackButtonDispatcher() {
+  })  : backButtonDispatcher = RootBackButtonDispatcher(),
+        assert(
+          initialExtra == null || initialLocation != null,
+          'initialLocation must be set in order to use initialExtra',
+        ) {
     setLogging(enabled: debugLogDiagnostics);
     WidgetsFlutterBinding.ensureInitialized();
 
@@ -82,9 +88,15 @@ class GoRouter extends ChangeNotifier implements RouterConfig<RouteMatchList> {
     );
 
     _routeInformationProvider = GoRouteInformationProvider(
-        initialRouteInformation: RouteInformation(
-            location: _effectiveInitialLocation(initialLocation)),
-        refreshListenable: refreshListenable);
+      initialRouteInformation: RouteInformation(
+        // TODO(chunhtai): remove this ignore and migrate the code
+        // https://github.com/flutter/flutter/issues/124045.
+        // ignore: deprecated_member_use
+        location: _effectiveInitialLocation(initialLocation),
+        state: initialExtra,
+      ),
+      refreshListenable: refreshListenable,
+    );
 
     _routerDelegate = GoRouterDelegate(
       configuration: _routeConfiguration,
@@ -142,7 +154,7 @@ class GoRouter extends ChangeNotifier implements RouterConfig<RouteMatchList> {
   String get location => _location;
   String _location = '/';
 
-  /// Returns `true` if there is more than 1 page on the stack.
+  /// Returns `true` if there is at least two or more route can be pop.
   bool canPop() => _routerDelegate.canPop();
 
   void _handleStateMayChange() {
@@ -151,7 +163,7 @@ class GoRouter extends ChangeNotifier implements RouterConfig<RouteMatchList> {
         routerDelegate.currentConfiguration.matches.last
             is ImperativeRouteMatch) {
       newLocation = (routerDelegate.currentConfiguration.matches.last
-              as ImperativeRouteMatch)
+              as ImperativeRouteMatch<Object?>)
           .matches
           .uri
           .toString();
@@ -168,13 +180,13 @@ class GoRouter extends ChangeNotifier implements RouterConfig<RouteMatchList> {
   /// This is useful for redirecting to a named location.
   String namedLocation(
     String name, {
-    Map<String, String> params = const <String, String>{},
-    Map<String, dynamic> queryParams = const <String, dynamic>{},
+    Map<String, String> pathParameters = const <String, String>{},
+    Map<String, dynamic> queryParameters = const <String, dynamic>{},
   }) =>
       _routeInformationParser.configuration.namedLocation(
         name,
-        params: params,
-        queryParams: queryParams,
+        pathParameters: pathParameters,
+        queryParameters: queryParameters,
       );
 
   /// Navigate to a URI location w/ optional query parameters, e.g.
@@ -185,52 +197,66 @@ class GoRouter extends ChangeNotifier implements RouterConfig<RouteMatchList> {
       return true;
     }());
     _routeInformationProvider.value =
+        // TODO(chunhtai): remove this ignore and migrate the code
+        // https://github.com/flutter/flutter/issues/124045.
+        // ignore: deprecated_member_use
         RouteInformation(location: location, state: extra);
   }
 
   /// Navigate to a named route w/ optional parameters, e.g.
-  /// `name='person', params={'fid': 'f2', 'pid': 'p1'}`
+  /// `name='person', pathParameters={'fid': 'f2', 'pid': 'p1'}`
   /// Navigate to the named route.
   void goNamed(
     String name, {
-    Map<String, String> params = const <String, String>{},
-    Map<String, dynamic> queryParams = const <String, dynamic>{},
+    Map<String, String> pathParameters = const <String, String>{},
+    Map<String, dynamic> queryParameters = const <String, dynamic>{},
     Object? extra,
   }) =>
       go(
-        namedLocation(name, params: params, queryParams: queryParams),
+        namedLocation(name,
+            pathParameters: pathParameters, queryParameters: queryParameters),
         extra: extra,
       );
 
   /// Push a URI location onto the page stack w/ optional query parameters, e.g.
-  /// `/family/f2/person/p1?color=blue`
-  void push(String location, {Object? extra}) {
+  /// `/family/f2/person/p1?color=blue`.
+  ///
+  /// See also:
+  /// * [pushReplacement] which replaces the top-most page of the page stack and
+  ///   always use a new page key.
+  /// * [replace] which replaces the top-most page of the page stack but treats
+  ///   it as the same page. The page key will be reused. This will preserve the
+  ///   state and not run any page animation.
+  Future<T?> push<T extends Object?>(String location, {Object? extra}) async {
     assert(() {
       log.info('pushing $location');
       return true;
     }());
-    _routeInformationParser
-        .parseRouteInformationWithDependencies(
+    final RouteMatchList matches =
+        await _routeInformationParser.parseRouteInformationWithDependencies(
+      // TODO(chunhtai): remove this ignore and migrate the code
+      // https://github.com/flutter/flutter/issues/124045.
+      // ignore: deprecated_member_use
       RouteInformation(location: location, state: extra),
       // TODO(chunhtai): avoid accessing the context directly through global key.
       // https://github.com/flutter/flutter/issues/99112
       _routerDelegate.navigatorKey.currentContext!,
-    )
-        .then<void>((RouteMatchList matches) {
-      _routerDelegate.push(matches);
-    });
+    );
+
+    return _routerDelegate.push<T>(matches);
   }
 
   /// Push a named route onto the page stack w/ optional parameters, e.g.
-  /// `name='person', params={'fid': 'f2', 'pid': 'p1'}`
-  void pushNamed(
+  /// `name='person', pathParameters={'fid': 'f2', 'pid': 'p1'}`
+  Future<T?> pushNamed<T extends Object?>(
     String name, {
-    Map<String, String> params = const <String, String>{},
-    Map<String, dynamic> queryParams = const <String, dynamic>{},
+    Map<String, String> pathParameters = const <String, String>{},
+    Map<String, dynamic> queryParameters = const <String, dynamic>{},
     Object? extra,
   }) =>
-      push(
-        namedLocation(name, params: params, queryParams: queryParams),
+      push<T>(
+        namedLocation(name,
+            pathParameters: pathParameters, queryParameters: queryParameters),
         extra: extra,
       );
 
@@ -239,10 +265,62 @@ class GoRouter extends ChangeNotifier implements RouterConfig<RouteMatchList> {
   ///
   /// See also:
   /// * [go] which navigates to the location.
-  /// * [push] which pushes the location onto the page stack.
+  /// * [push] which pushes the given location onto the page stack.
+  /// * [replace] which replaces the top-most page of the page stack but treats
+  ///   it as the same page. The page key will be reused. This will preserve the
+  ///   state and not run any page animation.
+  void pushReplacement(String location, {Object? extra}) {
+    routeInformationParser
+        .parseRouteInformationWithDependencies(
+      // TODO(chunhtai): remove this ignore and migrate the code
+      // https://github.com/flutter/flutter/issues/124045.
+      // ignore: deprecated_member_use
+      RouteInformation(location: location, state: extra),
+      // TODO(chunhtai): avoid accessing the context directly through global key.
+      // https://github.com/flutter/flutter/issues/99112
+      _routerDelegate.navigatorKey.currentContext!,
+    )
+        .then<void>((RouteMatchList matchList) {
+      routerDelegate.pushReplacement(matchList);
+    });
+  }
+
+  /// Replaces the top-most page of the page stack with the named route w/
+  /// optional parameters, e.g. `name='person', pathParameters={'fid': 'f2', 'pid':
+  /// 'p1'}`.
+  ///
+  /// See also:
+  /// * [goNamed] which navigates a named route.
+  /// * [pushNamed] which pushes a named route onto the page stack.
+  void pushReplacementNamed(
+    String name, {
+    Map<String, String> pathParameters = const <String, String>{},
+    Map<String, dynamic> queryParameters = const <String, dynamic>{},
+    Object? extra,
+  }) {
+    pushReplacement(
+      namedLocation(name,
+          pathParameters: pathParameters, queryParameters: queryParameters),
+      extra: extra,
+    );
+  }
+
+  /// Replaces the top-most page of the page stack with the given one but treats
+  /// it as the same page.
+  ///
+  /// The page key will be reused. This will preserve the state and not run any
+  /// page animation.
+  ///
+  /// See also:
+  /// * [push] which pushes the given location onto the page stack.
+  /// * [pushReplacement] which replaces the top-most page of the page stack but
+  ///   always uses a new page key.
   void replace(String location, {Object? extra}) {
     routeInformationParser
         .parseRouteInformationWithDependencies(
+      // TODO(chunhtai): remove this ignore and migrate the code
+      // https://github.com/flutter/flutter/issues/124045.
+      // ignore: deprecated_member_use
       RouteInformation(location: location, state: extra),
       // TODO(chunhtai): avoid accessing the context directly through global key.
       // https://github.com/flutter/flutter/issues/99112
@@ -253,32 +331,40 @@ class GoRouter extends ChangeNotifier implements RouterConfig<RouteMatchList> {
     });
   }
 
-  /// Replaces the top-most page of the page stack with the named route w/
-  /// optional parameters, e.g. `name='person', params={'fid': 'f2', 'pid':
-  /// 'p1'}`.
+  /// Replaces the top-most page with the named route and optional parameters,
+  /// preserving the page key.
+  ///
+  /// This will preserve the state and not run any page animation. Optional
+  /// parameters can be providded to the named route, e.g. `name='person',
+  /// pathParameters={'fid': 'f2', 'pid': 'p1'}`.
   ///
   /// See also:
-  /// * [goNamed] which navigates a named route.
-  /// * [pushNamed] which pushes a named route onto the page stack.
+  /// * [pushNamed] which pushes the given location onto the page stack.
+  /// * [pushReplacementNamed] which replaces the top-most page of the page
+  ///   stack but always uses a new page key.
   void replaceNamed(
     String name, {
-    Map<String, String> params = const <String, String>{},
-    Map<String, dynamic> queryParams = const <String, dynamic>{},
+    Map<String, String> pathParameters = const <String, String>{},
+    Map<String, dynamic> queryParameters = const <String, dynamic>{},
     Object? extra,
   }) {
     replace(
-      namedLocation(name, params: params, queryParams: queryParams),
+      namedLocation(name,
+          pathParameters: pathParameters, queryParameters: queryParameters),
       extra: extra,
     );
   }
 
-  /// Pop the top page off the GoRouter's page stack.
-  void pop() {
+  /// Pop the top-most route off the current screen.
+  ///
+  /// If the top-most route is a pop up or dialog, this method pops it instead
+  /// of any GoRoute under it.
+  void pop<T extends Object?>([T? result]) {
     assert(() {
       log.info('popping $location');
       return true;
     }());
-    _routerDelegate.pop();
+    _routerDelegate.pop<T>(result);
   }
 
   /// Refresh the route.
@@ -296,6 +382,13 @@ class GoRouter extends ChangeNotifier implements RouterConfig<RouteMatchList> {
         context.dependOnInheritedWidgetOfExactType<InheritedGoRouter>();
     assert(inherited != null, 'No GoRouter found in context');
     return inherited!.goRouter;
+  }
+
+  /// The current GoRouter in the widget tree, if any.
+  static GoRouter? maybeOf(BuildContext context) {
+    final InheritedGoRouter? inherited =
+        context.dependOnInheritedWidgetOfExactType<InheritedGoRouter>();
+    return inherited?.goRouter;
   }
 
   @override
