@@ -4,9 +4,9 @@
 * Aligns Dart and Flutter SDK constraints.
 * Replace `describeEnum` with the `name` getter.
 
-## 0.6.14
+## 0.6.15
 
-* Fixes combination of inline styles causing unwanted line breaks.
+* Rebase to upstream main
 
 ## 0.6.14
 
