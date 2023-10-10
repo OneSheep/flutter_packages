@@ -299,7 +299,7 @@ class WKFrameInfoData {
 class NSErrorData {
   late int code;
   late String domain;
-  late String localizedDescription;
+  late Map<String?, Object?>? userInfo;
 }
 
 /// Mirror of WKScriptMessage.
@@ -415,6 +415,11 @@ abstract class WKWebViewConfigurationHostApi {
     'setAllowsInlineMediaPlaybackForConfigurationWithIdentifier:isAllowed:',
   )
   void setAllowsInlineMediaPlayback(int identifier, bool allow);
+
+  @ObjCSelector(
+    'setLimitsNavigationsToAppBoundDomainsForConfigurationWithIdentifier:isLimited:',
+  )
+  void setLimitsNavigationsToAppBoundDomains(int identifier, bool limit);
 
   @ObjCSelector(
     'setMediaTypesRequiresUserActionForConfigurationWithIdentifier:forTypes:',
@@ -683,12 +688,18 @@ abstract class WKWebViewHostApi {
   @ObjCSelector('setAllowsBackForwardForWebViewWithIdentifier:isAllowed:')
   void setAllowsBackForwardNavigationGestures(int identifier, bool allow);
 
-  @ObjCSelector('setUserAgentForWebViewWithIdentifier:userAgent:')
+  @ObjCSelector('setCustomUserAgentForWebViewWithIdentifier:userAgent:')
   void setCustomUserAgent(int identifier, String? userAgent);
 
   @ObjCSelector('evaluateJavaScriptForWebViewWithIdentifier:javaScriptString:')
   @async
   Object? evaluateJavaScript(int identifier, String javaScriptString);
+
+  @ObjCSelector('setInspectableForWebViewWithIdentifier:inspectable:')
+  void setInspectable(int identifier, bool inspectable);
+
+  @ObjCSelector('customUserAgentForWebViewWithIdentifier:')
+  String? getCustomUserAgent(int identifier);
 }
 
 /// Mirror of WKUIDelegate.

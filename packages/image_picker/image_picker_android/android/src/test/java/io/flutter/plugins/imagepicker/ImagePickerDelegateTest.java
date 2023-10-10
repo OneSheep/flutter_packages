@@ -23,21 +23,26 @@ import static org.mockito.Mockito.when;
 import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import androidx.annotation.Nullable;
 import io.flutter.plugins.imagepicker.Messages.FlutterError;
+import io.flutter.plugins.imagepicker.Messages.GeneralOptions;
 import io.flutter.plugins.imagepicker.Messages.ImageSelectionOptions;
+import io.flutter.plugins.imagepicker.Messages.MediaSelectionOptions;
 import io.flutter.plugins.imagepicker.Messages.VideoSelectionOptions;
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -59,6 +64,8 @@ public class ImagePickerDelegateTest {
       new ImageSelectionOptions.Builder().setQuality((long) 100).setMaxWidth(WIDTH).build();
   private static final VideoSelectionOptions DEFAULT_VIDEO_OPTIONS =
       new VideoSelectionOptions.Builder().build();
+  private static final MediaSelectionOptions DEFAULT_MEDIA_OPTIONS =
+      new MediaSelectionOptions.Builder().setImageSelectionOptions(DEFAULT_IMAGE_OPTIONS).build();
 
   @Mock Activity mockActivity;
   @Mock ImageResizer mockImageResizer;
@@ -74,6 +81,8 @@ public class ImagePickerDelegateTest {
 
   AutoCloseable mockCloseable;
 
+  File externalDirectory;
+
   private static class MockFileUriResolver implements ImagePickerDelegate.FileUriResolver {
     @Override
     public Uri resolveFileProviderUriForFile(String fileProviderName, File imageFile) {
@@ -87,7 +96,7 @@ public class ImagePickerDelegateTest {
   }
 
   @Before
-  public void setUp() {
+  public void setUp() throws IOException {
     mockCloseable = MockitoAnnotations.openMocks(this);
 
     mockStaticFile = Mockito.mockStatic(File.class);
@@ -97,6 +106,11 @@ public class ImagePickerDelegateTest {
 
     when(mockActivity.getPackageName()).thenReturn("com.example.test");
     when(mockActivity.getPackageManager()).thenReturn(mock(PackageManager.class));
+
+    TemporaryFolder temporaryFolder = new TemporaryFolder();
+    temporaryFolder.create();
+    externalDirectory = temporaryFolder.newFolder("image_picker_cache");
+    when(mockActivity.getCacheDir()).thenReturn(externalDirectory);
 
     when(mockFileUtils.getPathFromUri(any(Context.class), any(Uri.class)))
         .thenReturn("pathFromUri");
@@ -147,6 +161,18 @@ public class ImagePickerDelegateTest {
         createDelegateWithPendingResultAndOptions(DEFAULT_IMAGE_OPTIONS, null);
 
     delegate.chooseMultiImageFromGallery(DEFAULT_IMAGE_OPTIONS, false, mockResult);
+
+    verifyFinishedWithAlreadyActiveError();
+    verifyNoMoreInteractions(mockResult);
+  }
+
+  @Test
+  public void chooseMediaFromGallery_whenPendingResultExists_finishesWithAlreadyActiveError() {
+    ImagePickerDelegate delegate =
+        createDelegateWithPendingResultAndOptions(DEFAULT_IMAGE_OPTIONS, null);
+    GeneralOptions generalOptions =
+        new GeneralOptions.Builder().setAllowMultiple(true).setUsePhotoPicker(true).build();
+    delegate.chooseMediaFromGallery(DEFAULT_MEDIA_OPTIONS, generalOptions, mockResult);
 
     verifyFinishedWithAlreadyActiveError();
     verifyNoMoreInteractions(mockResult);
@@ -300,8 +326,7 @@ public class ImagePickerDelegateTest {
     delegate.takeImageWithCamera(DEFAULT_IMAGE_OPTIONS, mockResult);
 
     mockStaticFile.verify(
-        () -> File.createTempFile(any(), eq(".jpg"), eq(new File("/image_picker_cache"))),
-        times(1));
+        () -> File.createTempFile(any(), eq(".jpg"), eq(externalDirectory)), times(1));
   }
 
   @Test
@@ -410,6 +435,114 @@ public class ImagePickerDelegateTest {
     ArgumentCaptor<List<String>> pathListCapture = ArgumentCaptor.forClass(List.class);
     verify(mockResult).success(pathListCapture.capture());
     assertEquals("originalPath", pathListCapture.getValue().get(0));
+    verifyNoMoreInteractions(mockResult);
+  }
+
+  @Test
+  public void
+      onActivityResult_whenImagePickedFromGallery_nullUriFromGetData_andNoResizeNeeded_finishesWithImagePath() {
+    setupMockClipData();
+
+    when(mockIntent.getData()).thenReturn(null);
+
+    Mockito.doAnswer(
+            invocation -> {
+              ((Runnable) invocation.getArgument(0)).run();
+              return null;
+            })
+        .when(mockExecutor)
+        .execute(any(Runnable.class));
+    ImagePickerDelegate delegate =
+        createDelegateWithPendingResultAndOptions(DEFAULT_IMAGE_OPTIONS, null);
+
+    delegate.onActivityResult(
+        ImagePickerDelegate.REQUEST_CODE_CHOOSE_IMAGE_FROM_GALLERY, Activity.RESULT_OK, mockIntent);
+
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<String>> pathListCapture = ArgumentCaptor.forClass(List.class);
+    verify(mockResult).success(pathListCapture.capture());
+    assertEquals("originalPath", pathListCapture.getValue().get(0));
+    verifyNoMoreInteractions(mockResult);
+  }
+
+  @Test
+  public void
+      onActivityResult_whenVideoPickedFromGallery_nullUriFromGetData_finishesWithVideoPath() {
+    setupMockClipData();
+
+    when(mockIntent.getData()).thenReturn(null);
+
+    Mockito.doAnswer(
+            invocation -> {
+              ((Runnable) invocation.getArgument(0)).run();
+              return null;
+            })
+        .when(mockExecutor)
+        .execute(any(Runnable.class));
+    ImagePickerDelegate delegate =
+        createDelegateWithPendingResultAndOptions(null, DEFAULT_VIDEO_OPTIONS);
+
+    delegate.onActivityResult(
+        ImagePickerDelegate.REQUEST_CODE_CHOOSE_VIDEO_FROM_GALLERY, Activity.RESULT_OK, mockIntent);
+
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<List<String>> pathListCapture = ArgumentCaptor.forClass(List.class);
+    verify(mockResult).success(pathListCapture.capture());
+    assertEquals("pathFromUri", pathListCapture.getValue().get(0));
+    verifyNoMoreInteractions(mockResult);
+  }
+
+  @Test
+  public void
+      onActivityResult_whenImagePickedFromGallery_nullUri_andNoResizeNeeded_finishesWithNoValidUriError() {
+    setupMockClipDataNullUri();
+
+    when(mockIntent.getData()).thenReturn(null);
+
+    Mockito.doAnswer(
+            invocation -> {
+              ((Runnable) invocation.getArgument(0)).run();
+              return null;
+            })
+        .when(mockExecutor)
+        .execute(any(Runnable.class));
+    ImagePickerDelegate delegate =
+        createDelegateWithPendingResultAndOptions(DEFAULT_IMAGE_OPTIONS, null);
+
+    delegate.onActivityResult(
+        ImagePickerDelegate.REQUEST_CODE_CHOOSE_IMAGE_FROM_GALLERY, Activity.RESULT_OK, mockIntent);
+
+    ArgumentCaptor<FlutterError> errorCaptor = ArgumentCaptor.forClass(FlutterError.class);
+    verify(mockResult).error(errorCaptor.capture());
+    assertEquals("no_valid_image_uri", errorCaptor.getValue().code);
+    assertEquals("Cannot find the selected image.", errorCaptor.getValue().getMessage());
+    verifyNoMoreInteractions(mockResult);
+  }
+
+  @Test
+  public void onActivityResult_whenVideoPickedFromGallery_nullUri_finishesWithNoValidUriError() {
+    setupMockClipDataNullUri();
+
+    when(mockIntent.getData()).thenReturn(null);
+
+    Mockito.doAnswer(
+            invocation -> {
+              ((Runnable) invocation.getArgument(0)).run();
+              return null;
+            })
+        .when(mockExecutor)
+        .execute(any(Runnable.class));
+    ImagePickerDelegate delegate =
+        createDelegateWithPendingResultAndOptions(null, DEFAULT_VIDEO_OPTIONS);
+
+    delegate.onActivityResult(
+        ImagePickerDelegate.REQUEST_CODE_CHOOSE_VIDEO_FROM_GALLERY, Activity.RESULT_OK, mockIntent);
+
+    @SuppressWarnings("unchecked")
+    ArgumentCaptor<FlutterError> errorCaptor = ArgumentCaptor.forClass(FlutterError.class);
+    verify(mockResult).error(errorCaptor.capture());
+    assertEquals("no_valid_video_uri", errorCaptor.getValue().code);
+    assertEquals("Cannot find the selected video.", errorCaptor.getValue().getMessage());
     verifyNoMoreInteractions(mockResult);
   }
 
@@ -624,6 +757,19 @@ public class ImagePickerDelegateTest {
   }
 
   @Test
+  public void onActivityResult_whenMediaPickedFromGallery_returnsTrue() {
+    ImagePickerDelegate delegate = createDelegate();
+
+    boolean isHandled =
+        delegate.onActivityResult(
+            ImagePickerDelegate.REQUEST_CODE_CHOOSE_MEDIA_FROM_GALLERY,
+            Activity.RESULT_OK,
+            mockIntent);
+
+    assertTrue(isHandled);
+  }
+
+  @Test
   public void onActivityResult_whenVideoPickerFromGallery_returnsTrue() {
     ImagePickerDelegate delegate = createDelegate();
 
@@ -674,7 +820,6 @@ public class ImagePickerDelegateTest {
   private ImagePickerDelegate createDelegate() {
     return new ImagePickerDelegate(
         mockActivity,
-        new File("/image_picker_cache"),
         mockImageResizer,
         null,
         null,
@@ -690,7 +835,6 @@ public class ImagePickerDelegateTest {
       @Nullable ImageSelectionOptions imageOptions, @Nullable VideoSelectionOptions videoOptions) {
     return new ImagePickerDelegate(
         mockActivity,
-        new File("/image_picker_cache"),
         mockImageResizer,
         imageOptions,
         videoOptions,
@@ -707,5 +851,24 @@ public class ImagePickerDelegateTest {
     verify(mockResult).error(errorCaptor.capture());
     assertEquals("already_active", errorCaptor.getValue().code);
     assertEquals("Image picker is already active", errorCaptor.getValue().getMessage());
+  }
+
+  private void setupMockClipData() {
+    ClipData mockClipData = mock(ClipData.class);
+    ClipData.Item mockItem = mock(ClipData.Item.class);
+    Uri mockUri = mock(Uri.class);
+    when(mockItem.getUri()).thenReturn(mockUri);
+    when(mockClipData.getItemCount()).thenReturn(1);
+    when(mockClipData.getItemAt(0)).thenReturn(mockItem);
+    when(mockIntent.getClipData()).thenReturn(mockClipData);
+  }
+
+  private void setupMockClipDataNullUri() {
+    ClipData mockClipData = mock(ClipData.class);
+    ClipData.Item mockItem = mock(ClipData.Item.class);
+    when(mockItem.getUri()).thenReturn(null);
+    when(mockClipData.getItemCount()).thenReturn(1);
+    when(mockClipData.getItemAt(0)).thenReturn(mockItem);
+    when(mockIntent.getClipData()).thenReturn(mockClipData);
   }
 }

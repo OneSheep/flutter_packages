@@ -4,23 +4,25 @@
 
 package io.flutter.plugins.imagepicker;
 
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.util.SizeFCompat;
+import androidx.exifinterface.media.ExifInterface;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 
 class ImageResizer {
-  private final File externalFilesDirectory;
+  private final Context context;
   private final ExifDataCopier exifDataCopier;
 
-  ImageResizer(File externalFilesDirectory, ExifDataCopier exifDataCopier) {
-    this.externalFilesDirectory = externalFilesDirectory;
+  ImageResizer(final @NonNull Context context, final @NonNull ExifDataCopier exifDataCopier) {
+    this.context = context;
     this.exifDataCopier = exifDataCopier;
   }
 
@@ -136,7 +138,11 @@ class ImageResizer {
   }
 
   private void copyExif(String filePathOri, String filePathDest) {
-    exifDataCopier.copyExif(filePathOri, filePathDest);
+    try {
+      exifDataCopier.copyExif(new ExifInterface(filePathOri), new ExifInterface(filePathDest));
+    } catch (Exception ex) {
+      Log.e("ImageResizer", "Error preserving Exif data on selected image: " + ex);
+    }
   }
 
   private SizeFCompat readFileDimensions(String path) {
@@ -193,7 +199,9 @@ class ImageResizer {
         saveAsPNG ? Bitmap.CompressFormat.PNG : Bitmap.CompressFormat.JPEG,
         imageQuality,
         outputStream);
-    File imageFile = createFile(externalFilesDirectory, name);
+
+    File cacheDirectory = context.getCacheDir();
+    File imageFile = createFile(cacheDirectory, name);
     FileOutputStream fileOutput = createOutputStream(imageFile);
     fileOutput.write(outputStream.toByteArray());
     fileOutput.close();

@@ -55,7 +55,11 @@ class SwiftGenerator extends StructuredGenerator<SwiftOptions> {
 
   @override
   void writeFilePrologue(
-      SwiftOptions generatorOptions, Root root, Indent indent) {
+    SwiftOptions generatorOptions,
+    Root root,
+    Indent indent, {
+    required String dartPackageName,
+  }) {
     if (generatorOptions.copyrightHeader != null) {
       addLines(indent, generatorOptions.copyrightHeader!, linePrefix: '// ');
     }
@@ -66,7 +70,11 @@ class SwiftGenerator extends StructuredGenerator<SwiftOptions> {
 
   @override
   void writeFileImports(
-      SwiftOptions generatorOptions, Root root, Indent indent) {
+    SwiftOptions generatorOptions,
+    Root root,
+    Indent indent, {
+    required String dartPackageName,
+  }) {
     indent.writeln('import Foundation');
     indent.format('''
 #if os(iOS)
@@ -80,7 +88,12 @@ import FlutterMacOS
 
   @override
   void writeEnum(
-      SwiftOptions generatorOptions, Root root, Indent indent, Enum anEnum) {
+    SwiftOptions generatorOptions,
+    Root root,
+    Indent indent,
+    Enum anEnum, {
+    required String dartPackageName,
+  }) {
     indent.newln();
     addDocumentationComments(
         indent, anEnum.documentationComments, _docCommentSpec);
@@ -97,7 +110,12 @@ import FlutterMacOS
 
   @override
   void writeDataClass(
-      SwiftOptions generatorOptions, Root root, Indent indent, Class klass) {
+    SwiftOptions generatorOptions,
+    Root root,
+    Indent indent,
+    Class klass, {
+    required String dartPackageName,
+  }) {
     final Set<String> customClassNames =
         root.classes.map((Class x) => x.name).toSet();
     final Set<String> customEnumNames =
@@ -118,10 +136,24 @@ import FlutterMacOS
       });
 
       indent.newln();
-      writeClassDecode(generatorOptions, root, indent, klass, customClassNames,
-          customEnumNames);
-      writeClassEncode(generatorOptions, root, indent, klass, customClassNames,
-          customEnumNames);
+      writeClassDecode(
+        generatorOptions,
+        root,
+        indent,
+        klass,
+        customClassNames,
+        customEnumNames,
+        dartPackageName: dartPackageName,
+      );
+      writeClassEncode(
+        generatorOptions,
+        root,
+        indent,
+        klass,
+        customClassNames,
+        customEnumNames,
+        dartPackageName: dartPackageName,
+      );
     });
   }
 
@@ -132,8 +164,9 @@ import FlutterMacOS
     Indent indent,
     Class klass,
     Set<String> customClassNames,
-    Set<String> customEnumNames,
-  ) {
+    Set<String> customEnumNames, {
+    required String dartPackageName,
+  }) {
     indent.write('func toList() -> [Any?] ');
     indent.addScoped('{', '}', () {
       indent.write('return ');
@@ -166,8 +199,9 @@ import FlutterMacOS
     Indent indent,
     Class klass,
     Set<String> customClassNames,
-    Set<String> customEnumNames,
-  ) {
+    Set<String> customEnumNames, {
+    required String dartPackageName,
+  }) {
     final String className = klass.name;
     indent.write('static func fromList(_ list: [Any?]) -> $className? ');
 
@@ -213,14 +247,16 @@ import FlutterMacOS
   void writeApis(
     SwiftOptions generatorOptions,
     Root root,
-    Indent indent,
-  ) {
+    Indent indent, {
+    required String dartPackageName,
+  }) {
     if (root.apis.any((Api api) =>
         api.location == ApiLocation.host &&
         api.methods.any((Method it) => it.isAsynchronous))) {
       indent.newln();
     }
-    super.writeApis(generatorOptions, root, indent);
+    super.writeApis(generatorOptions, root, indent,
+        dartPackageName: dartPackageName);
   }
 
   /// Writes the code for a flutter [Api], [api].
@@ -235,9 +271,22 @@ import FlutterMacOS
     SwiftOptions generatorOptions,
     Root root,
     Indent indent,
-    Api api,
-  ) {
+    Api api, {
+    required String dartPackageName,
+  }) {
     assert(api.location == ApiLocation.flutter);
+
+    /// Returns an argument name that can be used in a context where it is possible to collide.
+    String getEnumSafeArgumentExpression(
+        Root root, int count, NamedType argument) {
+      String enumTag = '';
+      if (isEnum(root, argument.type)) {
+        enumTag = argument.type.isNullable ? '?.rawValue' : '.rawValue';
+      }
+
+      return '${_getArgumentName(count, argument)}Arg$enumTag';
+    }
+
     final bool isCustomCodec = getCodecClasses(api, root).isNotEmpty;
     if (isCustomCodec) {
       _writeCodec(indent, api, root);
@@ -268,9 +317,9 @@ import FlutterMacOS
         final _SwiftFunctionComponents components =
             _SwiftFunctionComponents.fromMethod(func);
 
-        final String channelName = makeChannelName(api, func);
+        final String channelName = makeChannelName(api, func, dartPackageName);
         final String returnType = func.returnType.isVoid
-            ? ''
+            ? 'Void'
             : _nullsafeSwiftTypeForDartType(func.returnType);
         String sendArgument;
         addDocumentationComments(
@@ -278,7 +327,7 @@ import FlutterMacOS
 
         if (func.arguments.isEmpty) {
           indent.write(
-              'func ${func.name}(completion: @escaping ($returnType) -> Void) ');
+              'func ${func.name}(completion: @escaping (Result<$returnType, FlutterError>) -> Void) ');
           sendArgument = 'nil';
         } else {
           final Iterable<String> argTypes = func.arguments
@@ -290,20 +339,20 @@ import FlutterMacOS
           });
           final Iterable<String> argNames =
               indexMap(func.arguments, _getSafeArgumentName);
-          sendArgument = '[${argNames.join(', ')}] as [Any?]';
+          final Iterable<String> enumSafeArgNames = func.arguments
+              .asMap()
+              .entries
+              .map((MapEntry<int, NamedType> e) =>
+                  getEnumSafeArgumentExpression(root, e.key, e.value));
+          sendArgument = '[${enumSafeArgNames.join(', ')}] as [Any?]';
           final String argsSignature = map3(
               argTypes,
               argLabels,
               argNames,
               (String type, String label, String name) =>
                   '$label $name: $type').join(', ');
-          if (func.returnType.isVoid) {
-            indent.write(
-                'func ${components.name}($argsSignature, completion: @escaping () -> Void) ');
-          } else {
-            indent.write(
-                'func ${components.name}($argsSignature, completion: @escaping ($returnType) -> Void) ');
-          }
+          indent.write(
+              'func ${components.name}($argsSignature, completion: @escaping (Result<$returnType, FlutterError>) -> Void) ');
         }
         indent.addScoped('{', '}', () {
           const String channel = 'channel';
@@ -312,18 +361,43 @@ import FlutterMacOS
           indent.write('$channel.sendMessage($sendArgument) ');
           if (func.returnType.isVoid) {
             indent.addScoped('{ _ in', '}', () {
-              indent.writeln('completion()');
+              indent.writeln('completion(.success(Void()))');
             });
           } else {
             indent.addScoped('{ response in', '}', () {
-              _writeDecodeCasting(
-                root: root,
-                indent: indent,
-                value: 'response',
-                variableName: 'result',
-                type: func.returnType,
-              );
-              indent.writeln('completion(result)');
+              indent.writeScoped(
+                  'guard let listResponse = response as? [Any?] else {', '}',
+                  () {
+                indent.writeln(
+                    'completion(.failure(FlutterError(code: "channel-error", message: "Unable to establish connection on channel.", details: "")))');
+                indent.writeln('return');
+              });
+              indent.writeScoped('if (listResponse.count > 1) {', '} ', () {
+                indent.writeln('let code: String = listResponse[0] as! String');
+                indent.writeln(
+                    'let message: String? = nilOrValue(listResponse[1])');
+                indent.writeln(
+                    'let details: String? = nilOrValue(listResponse[2])');
+                indent.writeln(
+                    'completion(.failure(FlutterError(code: code, message: message, details: details)));');
+              }, addTrailingNewline: false);
+              if (!func.returnType.isNullable && !func.returnType.isVoid) {
+                indent.addScoped('else if (listResponse[0] == nil) {', '} ',
+                    () {
+                  indent.writeln(
+                      'completion(.failure(FlutterError(code: "null-error", message: "Flutter api returned null value for non-null return value.", details: "")))');
+                }, addTrailingNewline: false);
+              }
+              indent.addScoped('else {', '}', () {
+                _writeDecodeCasting(
+                  root: root,
+                  indent: indent,
+                  value: 'listResponse[0]',
+                  variableName: 'result',
+                  type: func.returnType,
+                );
+                indent.writeln('completion(.success(result))');
+              });
             });
           }
         });
@@ -341,8 +415,9 @@ import FlutterMacOS
     SwiftOptions generatorOptions,
     Root root,
     Indent indent,
-    Api api,
-  ) {
+    Api api, {
+    required String dartPackageName,
+  }) {
     assert(api.location == ApiLocation.host);
 
     final String apiName = api.name;
@@ -416,7 +491,8 @@ import FlutterMacOS
           final _SwiftFunctionComponents components =
               _SwiftFunctionComponents.fromMethod(method);
 
-          final String channelName = makeChannelName(api, method);
+          final String channelName =
+              makeChannelName(api, method, dartPackageName);
           final String varChannelName = '${method.name}Channel';
           addDocumentationComments(
               indent, method.documentationComments, _docCommentSpec);
@@ -464,9 +540,14 @@ import FlutterMacOS
                 indent.addScoped('{ result in', '}', () {
                   indent.write('switch result ');
                   indent.addScoped('{', '}', () {
+                    final String nullsafe =
+                        method.returnType.isNullable ? '?' : '';
+                    final String enumTag = isEnum(root, method.returnType)
+                        ? '$nullsafe.rawValue'
+                        : '';
                     indent.writeln('case .success$successVariableInit:');
                     indent.nest(1, () {
-                      indent.writeln('reply(wrapResult($resultName))');
+                      indent.writeln('reply(wrapResult($resultName$enumTag))');
                     });
                     indent.writeln('case .failure(let error):');
                     indent.nest(1, () {
@@ -481,8 +562,16 @@ import FlutterMacOS
                     indent.writeln(call);
                     indent.writeln('reply(wrapResult(nil))');
                   } else {
+                    String enumTag = '';
+                    if (isEnum(root, method.returnType)) {
+                      enumTag = '.rawValue';
+                    }
+                    enumTag = method.returnType.isNullable &&
+                            isEnum(root, method.returnType)
+                        ? '?$enumTag'
+                        : enumTag;
                     indent.writeln('let result = $call');
-                    indent.writeln('reply(wrapResult(result))');
+                    indent.writeln('reply(wrapResult(result$enumTag))');
                   }
                 }, addTrailingNewline: false);
                 indent.addScoped(' catch {', '}', () {
@@ -499,7 +588,7 @@ import FlutterMacOS
     });
   }
 
-  /// Writes the codec classwill be used for encoding messages for the [api].
+  /// Writes the codec class will be used for encoding messages for the [api].
   /// Example:
   /// private class FooHostApiCodecReader: FlutterStandardReader {...}
   /// private class FooHostApiCodecWriter: FlutterStandardWriter {...}
@@ -601,16 +690,19 @@ import FlutterMacOS
   }) {
     String castForceUnwrap(String value, TypeDeclaration type, Root root) {
       if (isEnum(root, type)) {
-        assert(!type.isNullable,
-            'nullable enums require special code that this helper does not supply');
-        return '${_swiftTypeForDartType(type)}(rawValue: $value as! Int)!';
+        String output =
+            '${_swiftTypeForDartType(type)}(rawValue: $value as! Int)!';
+        if (type.isNullable) {
+          output = 'isNullish($value) ? nil : $output';
+        }
+        return output;
       } else if (type.baseName == 'Object') {
         return value + (type.isNullable ? '' : '!');
       } else if (type.baseName == 'int') {
         if (type.isNullable) {
           // Nullable ints need to check for NSNull, and Int32 before casting can be done safely.
           // This nested ternary is a necessary evil to avoid less efficient conversions.
-          return '$value is NSNull ? nil : ($value is Int64? ? $value as! Int64? : Int64($value as! Int32))';
+          return 'isNullish($value) ? nil : ($value is Int64? ? $value as! Int64? : Int64($value as! Int32))';
         } else {
           return '$value is Int64 ? $value as! Int64 : Int64($value as! Int32)';
         }
@@ -627,7 +719,8 @@ import FlutterMacOS
       if (listEncodedClassNames != null &&
           listEncodedClassNames.contains(type.baseName)) {
         indent.writeln('var $variableName: $fieldType? = nil');
-        indent.write('if let ${variableName}List = $value as! [Any?]? ');
+        indent
+            .write('if let ${variableName}List: [Any?] = nilOrValue($value) ');
         indent.addScoped('{', '}', () {
           indent.writeln(
               '$variableName = $fieldType.fromList(${variableName}List)');
@@ -657,6 +750,14 @@ import FlutterMacOS
             'let $variableName = ${castForceUnwrap(value, type, root)}');
       }
     }
+  }
+
+  void _writeIsNullish(Indent indent) {
+    indent.newln();
+    indent.write('private func isNullish(_ value: Any?) -> Bool ');
+    indent.addScoped('{', '}', () {
+      indent.writeln('return value is NSNull || value == nil');
+    });
   }
 
   void _writeWrapResult(Indent indent) {
@@ -700,7 +801,12 @@ private func nilOrValue<T>(_ value: Any?) -> T? {
 
   @override
   void writeGeneralUtilities(
-      SwiftOptions generatorOptions, Root root, Indent indent) {
+    SwiftOptions generatorOptions,
+    Root root,
+    Indent indent, {
+    required String dartPackageName,
+  }) {
+    _writeIsNullish(indent);
     _writeWrapResult(indent);
     _writeWrapError(indent);
     _writeNilOrValue(indent);
